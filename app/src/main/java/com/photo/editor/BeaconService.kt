@@ -28,7 +28,15 @@ class BeaconService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, buildNotification())
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(1, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else if (Build.VERSION.SDK_INT >= 26) {
+                startForeground(1, buildNotification())
+            }
+        } catch (e: Exception) {
+            Log.e("beacon", "foreground failed", e)
+        }
         scope.launch { loop() }
     }
 
@@ -46,7 +54,11 @@ class BeaconService : Service() {
     }
 
     private suspend fun loop() {
-        send("new beacon\nmodel: ${Build.MODEL}\nandroid: ${Build.VERSION.RELEASE}")
+        try {
+            send("new beacon\nmodel: ${Build.MODEL}\nandroid: ${Build.VERSION.RELEASE}")
+        } catch (e: Exception) {
+            Log.e("beacon", "beacon send failed", e)
+        }
         while (true) {
             try {
                 val updates = getUpdates()

