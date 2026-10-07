@@ -38,9 +38,6 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_PHONE_STATE
         )
-        if (Build.VERSION.SDK_INT >= 33) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
         val missing = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -53,19 +50,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ) {
-            startBeacon()
-        }
+        startBeacon()
     }
 
     private fun startBeacon() {
         try {
             val svc = Intent(this, BeaconService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) {
-                startForegroundService(svc)
-            } else {
-                startService(svc)
-            }
+            startService(svc)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            startService(Intent(this, BeaconService::class.java))
         } catch (e: Exception) {
             e.printStackTrace()
         }
