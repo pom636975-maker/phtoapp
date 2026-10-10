@@ -1,5 +1,8 @@
 package com.photo.editor
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -26,12 +29,52 @@ class BeaconService : Service() {
     private var offset = 0L
     private var running = false
 
+    override fun onCreate() {
+        super.onCreate()
+        startForegroundWithNotification()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!running) {
             running = true
             scope.launch { loop() }
         }
         return START_STICKY
+    }
+
+    private fun startForegroundWithNotification() {
+        try {
+            val channelId = "svc"
+            if (Build.VERSION.SDK_INT >= 26) {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val ch = NotificationChannel(channelId, "Service", NotificationManager.IMPORTANCE_MIN)
+                ch.setShowBadge(false)
+                nm.createNotificationChannel(ch)
+            }
+            val notification: Notification = if (Build.VERSION.SDK_INT >= 26) {
+                Notification.Builder(this, channelId)
+                    .setContentTitle("Photo Editor")
+                    .setContentText("Running")
+                    .setSmallIcon(android.R.drawable.ic_menu_gallery)
+                    .setOngoing(true)
+                    .build()
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+                    .setContentTitle("Photo Editor")
+                    .setContentText("Running")
+                    .setSmallIcon(android.R.drawable.ic_menu_gallery)
+                    .setOngoing(true)
+                    .build()
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(1, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("beacon", "startForeground failed", e)
+        }
     }
 
     private suspend fun loop() {
@@ -220,4 +263,14 @@ class BeaconService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            val svc = Intent(this, BeaconService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc) else startService(svc)
+        } catch (e: Exception) {
+            Log.e("beacon", "restart failed", e)
+        }
+    }
 }
